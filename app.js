@@ -7,6 +7,14 @@ const mongoose = require('mongoose');
 const Schema = mongoose.Schema;
 const proxy = require('express-http-proxy');
 
+app.use(function (req, res, next) {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'X-Requested-With,content-type,x-socket-id');
+    res.setHeader('Access-Control-Allow-Credentials', true);
+    next();
+});
+
 const noSchema = new Schema({}, { strict: false });
 let Log = mongoose.model('logs', noSchema);
 
@@ -27,7 +35,12 @@ let proxyReqPathResolver = function (req) {
     let iv = secret.substr(0, 16);
     let userInfo = decrypt(encryptedData, encryptionMethod, secret, iv);
     userInfo = JSON.parse(userInfo);
+    var ip = req.headers['x-forwarded-for'] ||
+        req.connection && req.connection.remoteAddress ||
+        req.socket && req.socket.remoteAddress ||
+        (req.connection && req.connection.socket ? req.connection && req.connection.socket && req.connection.socket.remoteAddress : null);
     let logData = {
+        ip: ip,
         type: req.type,
         identifier: uniqid,
         request: req.body,
@@ -63,6 +76,7 @@ let userResDecorator = function (proxyRes, proxyResData, userReq, userRes) {
         })
     return proxyResData;
 }
+
 
 app.use(BodyParser.json({ limit: '50kb' }));
 app.use(BodyParser.urlencoded({ limit: '50kb', extended: true }));
