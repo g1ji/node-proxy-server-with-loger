@@ -1,11 +1,11 @@
 const crypto = require('crypto');
 const Express = require('express');
 const UniqId = require('uniqid');
+var axios = require('axios');
 const app = Express();
 const BodyParser = require('body-parser');
 const mongoose = require('mongoose');
 const Schema = mongoose.Schema;
-const proxy = require('express-http-proxy');
 
 app.use(function (req, res, next) {
     res.setHeader('Access-Control-Allow-Origin', '*');
@@ -14,6 +14,18 @@ app.use(function (req, res, next) {
     res.setHeader('Access-Control-Allow-Credentials', true);
     next();
 });
+
+
+app.use(function (req, res, next) {
+    var data = "";
+    req.on('data', function (chunk) { data += chunk })
+    req.on('end', function () {
+        req.rawBody = data;
+        req.rawBody = req.rawBody || "";
+        next();
+    })
+})
+app.use(BodyParser.urlencoded({ limit: '50kb', extended: true }));
 
 const noSchema = new Schema({}, { strict: false });
 let Log = mongoose.model('logs', noSchema);
@@ -26,7 +38,7 @@ let decrypt = function (encryptedData, encryptionMethod, secret, iv) {
     return decipher.update(encryptedData, 'base64', 'utf8') + decipher.final('utf8');
 };
 
-let proxyReqPathResolver = function (req) {
+let inReqLogger = function (req) {
     let uniqid = UniqId();
     let date = new Date();
     let encryptedData = req.params.webhookId;
@@ -43,7 +55,7 @@ let proxyReqPathResolver = function (req) {
         ip: ip,
         type: req.type,
         identifier: uniqid,
-        request: req.body,
+        request: req.rawBody,
         userInfo: userInfo,
         webhookId: req.params.webhookId,
         inTime: date.getTime(),
@@ -55,17 +67,17 @@ let proxyReqPathResolver = function (req) {
     log.save().catch((e) => {
         console.log(e)
     })
-    return req.url;
 }
-let userResDecorator = function (proxyRes, proxyResData, userReq, userRes) {
+
+let outResLogger = function (req, res) {
     let logData = {};
     let date = new Date();
 
-    logData.response = JSON.parse(proxyResData.toString('utf8'));
-    logData.timeTaken = date.getTime() - userReq.logData.inTime;
+    logData.response = res;
+    logData.timeTaken = date.getTime() - req.logData.inTime;
     Log
         .findOneAndUpdate({
-            identifier: userReq.logData.identifier
+            identifier: req.logData.identifier
         }, {
             $set: logData
         }, {
@@ -74,39 +86,57 @@ let userResDecorator = function (proxyRes, proxyResData, userReq, userRes) {
         .catch((e) => {
             console.log(e)
         })
-    return proxyResData;
 }
 
-
-app.use(BodyParser.json({ limit: '50kb' }));
-app.use(BodyParser.urlencoded({ limit: '50kb', extended: true }));
 
 mongoose
     .connect(env.db, { useNewUrlParser: true, useUnifiedTopology: true })
     .then(() => {
         app.post('/series/:webhookId',
-            proxy(env.proxyTo, {
-                timeout: 2000,
-                https: false,
-                proxyReqPathResolver: function (req) {
-                    req.type = 'series';
-                    return proxyReqPathResolver(req);
-                },
-                userResDecorator: userResDecorator
-            })
-        )
+            function (req, res, next) {
+                inReqLogger(req);
+                req.type = 'series';
+                var options = {
+                    'method': 'POST',
+                    'url': `${env.proxyTo}series/${req.params.webhookId}`,
+                    'headers': {
+                        'Content-Type': 'text/plain'
+                    },
+                    'data': req.rawBody
+                };
+                axios(options)
+                    .then(function (response) {
+                        outResLogger(req, response.data);
+                    })
+                    .catch(function (error) {
+                        outResLogger(req, error.message);
+                    });
+                res.send({ accepted: true });
+                return next();
+            });
 
         app.post('/:webhookId',
-            proxy(env.proxyTo, {
-                timeout: 2000,
-                https: false,
-                proxyReqPathResolver: function (req) {
-                    req.type = 'parallel';
-                    return proxyReqPathResolver(req);
-                },
-                userResDecorator: userResDecorator
-            })
-        )
+            function (req, res, next) {
+                inReqLogger(req);
+                req.type = 'parallel';
+                var options = {
+                    'method': 'POST',
+                    'url': `${env.proxyTo}${req.params.webhookId}`,
+                    'headers': {
+                        'Content-Type': 'text/plain'
+                    },
+                    'data': req.rawBody
+                };
+                axios(options)
+                    .then(function (response) {
+                        outResLogger(req, response.data);
+                    })
+                    .catch(function (error) {
+                        outResLogger(req, error.message);
+                    });
+                res.send({ accepted: true });
+                return next();
+            });
     })
 var server = app.listen(env.port, function () {
     console.log(`==> ${new Date()} Server is running at http://localhost:${env.port}/`);
