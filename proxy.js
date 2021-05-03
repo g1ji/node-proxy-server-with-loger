@@ -94,8 +94,8 @@ mongoose
     .then(() => {
         app.post('/series/:webhookId',
             function (req, res, next) {
-                inReqLogger(req);
                 req.type = 'series';
+		inReqLogger(req);
                 var options = {
                     'method': 'POST',
                     'url': `${env.proxyTo}series/${req.params.webhookId}`,
@@ -117,9 +117,9 @@ mongoose
 
         app.post('/:webhookId',
             function (req, res, next) {
-                inReqLogger(req);
                 req.type = 'parallel';
-                var options = {
+                inReqLogger(req);
+		var options = {
                     'method': 'POST',
                     'url': `${env.proxyTo}${req.params.webhookId}`,
                     'headers': {
