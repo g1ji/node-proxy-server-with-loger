@@ -39,34 +39,40 @@ let decrypt = function (encryptedData, encryptionMethod, secret, iv) {
 };
 
 let inReqLogger = function (req) {
-    let uniqid = UniqId();
-    let date = new Date();
-    let encryptedData = req.params.webhookId;
-    let encryptionMethod = env.encryptionMethod;
-    let secret = env.webhookSecret;
-    let iv = secret.substr(0, 16);
-    let userInfo = decrypt(encryptedData, encryptionMethod, secret, iv);
-    userInfo = JSON.parse(userInfo);
-    var ip = req.headers['x-forwarded-for'] ||
-        req.connection && req.connection.remoteAddress ||
-        req.socket && req.socket.remoteAddress ||
-        (req.connection && req.connection.socket ? req.connection && req.connection.socket && req.connection.socket.remoteAddress : null);
-    let logData = {
-        ip: ip,
-        type: req.type,
-        identifier: uniqid,
-        request: req.rawBody,
-        userInfo: userInfo,
-        webhookId: req.params.webhookId,
-        inTime: date.getTime(),
-        timeStr: date.toString(),
-        time: date
+    try {
+        let uniqid = UniqId();
+        let date = new Date();
+        let encryptedData = req.params.webhookId;
+        let encryptionMethod = env.encryptionMethod;
+        let secret = env.webhookSecret;
+        let iv = secret.substr(0, 16);
+        let userInfo = decrypt(encryptedData, encryptionMethod, secret, iv);
+        userInfo = JSON.parse(userInfo);
+        var ip = req.headers['x-forwarded-for'] ||
+            req.connection && req.connection.remoteAddress ||
+            req.socket && req.socket.remoteAddress ||
+            (req.connection && req.connection.socket ? req.connection && req.connection.socket && req.connection.socket.remoteAddress : null);
+        let logData = {
+            ip: ip,
+            type: req.type,
+            identifier: uniqid,
+            request: req.rawBody,
+            userInfo: userInfo,
+            webhookId: req.params.webhookId,
+            inTime: date.getTime(),
+            timeStr: date.toString(),
+            time: date
+        }
+        req.logData = logData;
+        let log = new Log(logData)
+        log.save().catch((e) => {
+            console.log(e)
+        })
+    } catch (err) {
+        console.log(req.params.webhookId);
+        console.log(req.rawBody);
+        console.log(err);
     }
-    req.logData = logData;
-    let log = new Log(logData)
-    log.save().catch((e) => {
-        console.log(e)
-    })
 }
 
 let outResLogger = function (req, res) {
@@ -83,9 +89,11 @@ let outResLogger = function (req, res) {
         }, {
             upsert: true
         })
-        .catch((e) => {
-            console.log(e)
-        })
+        .catch((err) => {
+            console.log(req.params.webhookId);
+            console.log(req.rawBody);
+            console.log(err)
+        });
 }
 
 
@@ -95,7 +103,7 @@ mongoose
         app.post('/series/:webhookId',
             function (req, res, next) {
                 req.type = 'series';
-		inReqLogger(req);
+                inReqLogger(req);
                 var options = {
                     'method': 'POST',
                     'url': `${env.proxyTo}series/${req.params.webhookId}`,
@@ -119,7 +127,7 @@ mongoose
             function (req, res, next) {
                 req.type = 'parallel';
                 inReqLogger(req);
-		var options = {
+                var options = {
                     'method': 'POST',
                     'url': `${env.proxyTo}${req.params.webhookId}`,
                     'headers': {
